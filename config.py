@@ -18,10 +18,10 @@ from datetime import time
 
 # ── Fyers API Credentials ──────────────────────────────────────────────────────
 FYERS_CONFIG = {
-    "client_id":    "YOUR_CLIENT_ID",       # e.g. "XY12345-100"
-    "secret_key":   "YOUR_SECRET_KEY",
-    "redirect_uri": "https://127.0.0.1:8080",
-    "access_token": "YOUR_ACCESS_TOKEN",    # updated daily by auth_token.py
+    "client_id":    "AK7J3R8CMX-100",       # e.g. "XY1234-100"  (from Fyers API dashboard)
+    "secret_key":   "2VB8VZUSZF",      # from Fyers API dashboard
+    "redirect_uri": "https://www.google.com", 
+    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiZDoxIiwiZDoyIiwieDowIiwieDoxIiwieDoyIl0sImF0X2hhc2giOiJnQUFBQUFCcDN3RGNST1hOa1oxR1JfY0ltVHp6THZFTXhxNmJlR0RRUlRBc2xyM2w2UGVyLURjRXlrQUl2TVJ1UkNuX1VSQ2NuSEJsdjNiclBGWlJjNTFFVWF1NGhjcVQxcnZBUHRaV3EzQkVPRmp2UUlmRjJkRT0iLCJkaXNwbGF5X25hbWUiOiIiLCJvbXMiOiJLMSIsImhzbV9rZXkiOiJhYzhmZTc1ZWI0OTIwNTVjZmE5ODYwNWZhMWYyMTVlYzYzNzUzMjRjODQ4MzE4OWQ4YTk1ZGRiNiIsImlzRGRwaUVuYWJsZWQiOiJOIiwiaXNNdGZFbmFibGVkIjoiTiIsImZ5X2lkIjoiRkFBNTk2MzciLCJhcHBUeXBlIjoxMDAsImV4cCI6MTc3NjI5OTQwMCwiaWF0IjoxNzc2MjIyNDI4LCJpc3MiOiJhcGkuZnllcnMuaW4iLCJuYmYiOjE3NzYyMjI0MjgsInN1YiI6ImFjY2Vzc190b2tlbiJ9.Ma6kNLz23m-eS85Blny0Ph_3IpgxExo5rZHvSPHxo-4",    # updated daily by auth_token.py
 }
 
 # ── Trading Parameters ─────────────────────────────────────────────────────────
