@@ -102,42 +102,59 @@ class OptionSelector:
         raw.columns = known + extras
 
         # ── Step 4: Auto-detect the underlying symbol column ──────────────────
-        # Scan EVERY column for which one contains the most NIFTY (non-bank)
-        # values. This is position-independent — works even if Fyers shifts cols.
+        # The underlying_symbol column contains SHORT values like "NIFTY",
+        # "NIFTY50", "NIFTY 50" — NOT full option symbols like "NIFTY25APR...CE"
+        # We search for columns where values match short NIFTY (len <= 10)
+        # and are NOT the full option symbol string.
+        # This avoids picking symbol_details (col 1) which has long strings.
         best_col   = None
         best_count = 0
-        nifty_pat  = r"^NIFTY(?!.*BANK)"
 
         for col in raw.columns:
             col_vals = raw[col].astype(str).str.strip().str.upper()
-            count    = col_vals.str.match(nifty_pat).sum()
-            if count > best_count:
-                best_count = count
+            # Only count SHORT values (underlying ticker, not option symbol)
+            short_nifty = (
+                col_vals.str.match(r"^NIFTY(?!.*BANK)") &
+                (col_vals.str.len() <= 10)
+            ).sum()
+            if short_nifty > best_count:
+                best_count = short_nifty
                 best_col   = col
 
+        # Fallback: if short-value search failed, try col named underlying_symbol
         if best_col is None or best_count == 0:
-            # Log diagnostic info before raising
+            if "underlying_symbol" in raw.columns:
+                best_col   = "underlying_symbol"
+                col_vals   = raw[best_col].astype(str).str.strip().str.upper()
+                best_count = col_vals.str.match(
+                    r"^NIFTY(?!.*BANK)").sum()
+
+        if best_col is None or best_count == 0:
             sample = {str(c): str(raw.iloc[0][c])[:40]
-                      for c in raw.columns[:10]}
+                      for c in list(raw.columns)[:10]}
             logger.error(
-                f"[SymbolMaster] Could not find NIFTY column. "
+                f"[SymbolMaster] Could not find NIFTY underlying column. "
                 f"First row (cols 0-9): {sample}")
             raise ValueError(
-                "Symbol master: no NIFTY column found. "
-                "Run the diagnostic script to inspect the CSV.")
+                "Symbol master: no NIFTY underlying column found.")
 
         logger.info(
-            f"[SymbolMaster] NIFTY column = '{best_col}' "
-            f"({best_count} NIFTY rows found)")
-
-        # Rename best_col to underlying_symbol if it isn't already
-        if best_col != "underlying_symbol":
-            raw = raw.rename(columns={best_col: "underlying_symbol"})
+            f"[SymbolMaster] Underlying column = '{best_col}' "
+            f"({best_count} NIFTY rows)")
 
         # ── Step 5: Filter to NIFTY (not NIFTYBANK / BANKNIFTY) ───────────────
-        u     = raw["underlying_symbol"].astype(str).str.strip().str.upper()
-        mask  = u.str.match(nifty_pat)
-        df    = raw[mask].copy()
+        # Use the detected column directly by position to avoid duplicate-
+        # column issues if "underlying_symbol" already exists under another name
+        u    = raw[best_col].astype(str).str.strip().str.upper()
+        mask = u.str.match(r"^NIFTY(?!.*BANK)")
+        df   = raw[mask].copy()
+
+        # Ensure the filter column is named "underlying_symbol" in df
+        if best_col != "underlying_symbol":
+            # Drop any existing underlying_symbol to avoid duplicates
+            if "underlying_symbol" in df.columns:
+                df = df.drop(columns=["underlying_symbol"])
+            df = df.rename(columns={best_col: "underlying_symbol"})
 
         # ── Step 6: Locate and parse expiry_date ──────────────────────────────
         # Find which column has date-like values if "expiry_date" is misaligned
