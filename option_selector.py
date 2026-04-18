@@ -136,17 +136,29 @@ class OptionSelector:
             df = df.rename(columns={best_col: "underlying_symbol"})
 
         # ── Parse expiry_date ─────────────────────────────────────────────────
-        # Fyers stores expiry as YYYY-MM-DD string — parse directly
-        df["expiry_date"] = pd.to_datetime(
-            df["expiry_date"], format="%Y-%m-%d", errors="coerce").dt.date
+        # Fyers stores expiry as epoch seconds (Unix timestamp)
+        # e.g. "1745020200" → 2025-04-19
+        # Also handles YYYY-MM-DD string format as fallback.
+        expiry_raw = df["expiry_date"].copy()
 
-        # Fallback: try epoch seconds if YYYY-MM-DD parse failed
-        if df["expiry_date"].isna().all():
-            logger.info("[SymbolMaster] Trying epoch fallback for expiry_date")
-            df["expiry_date"] = df["expiry_date_raw"].apply(
-                lambda x: pd.Timestamp(int(x), unit="s").date()
-                if str(x).strip().isdigit() else None
-            ) if "expiry_date_raw" in df.columns else None
+        # Try epoch seconds first (most common Fyers format)
+        numeric = pd.to_numeric(expiry_raw, errors="coerce")
+        if numeric.notna().mean() > 0.5:
+            logger.info("[SymbolMaster] Parsing expiry_date as epoch seconds")
+            df["expiry_date"] = numeric.apply(
+                lambda x: pd.Timestamp(x, unit="s").date()
+                if pd.notna(x) else None
+            )
+        else:
+            # Try YYYY-MM-DD string format
+            df["expiry_date"] = pd.to_datetime(
+                expiry_raw, format="%Y-%m-%d", errors="coerce").dt.date
+
+        # Last resort: let pandas infer the format
+        if df["expiry_date"].isna().mean() > 0.5:
+            logger.info("[SymbolMaster] Trying inferred date format for expiry_date")
+            df["expiry_date"] = pd.to_datetime(
+                expiry_raw, errors="coerce").dt.date
 
         # ── Parse option_type ─────────────────────────────────────────────────
         df["option_type"] = (df["option_type"].fillna("")
