@@ -9,19 +9,18 @@ STRATEGY SUMMARY:
   SL      : Candle low (BUY CE) / candle high (BUY PE)
   Target  : Entry ± SL distance × RR  (initial 1:3)
   Step-down: 1:3 → 1:2 after 6 candles → 1:1 after 12 candles
-  Momentum: ADX(14) ≥ 25 on 15M + DI direction confirmation
   Filters : SL 10–70 pts | Daily loss 8%
-  Excluded: No VIX filter | No re-entry cooldown | No clustering
+  Excluded: No ADX | No VIX | No re-entry cooldown | No clustering
 """
 
 from datetime import time
 
 # ── Fyers API Credentials ──────────────────────────────────────────────────────
 FYERS_CONFIG = {
-    "client_id":    "AK7J3R8CMX-100",       # e.g. "XY1234-100"  (from Fyers API dashboard)
-    "secret_key":   "2VB8VZUSZF",      # from Fyers API dashboard
-    "redirect_uri": "https://www.google.com", 
-    "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdWQiOlsiZDoxIiwiZDoyIiwieDowIiwieDoxIiwieDoyIl0sImF0X2hhc2giOiJnQUFBQUFCcDN3RGNST1hOa1oxR1JfY0ltVHp6THZFTXhxNmJlR0RRUlRBc2xyM2w2UGVyLURjRXlrQUl2TVJ1UkNuX1VSQ2NuSEJsdjNiclBGWlJjNTFFVWF1NGhjcVQxcnZBUHRaV3EzQkVPRmp2UUlmRjJkRT0iLCJkaXNwbGF5X25hbWUiOiIiLCJvbXMiOiJLMSIsImhzbV9rZXkiOiJhYzhmZTc1ZWI0OTIwNTVjZmE5ODYwNWZhMWYyMTVlYzYzNzUzMjRjODQ4MzE4OWQ4YTk1ZGRiNiIsImlzRGRwaUVuYWJsZWQiOiJOIiwiaXNNdGZFbmFibGVkIjoiTiIsImZ5X2lkIjoiRkFBNTk2MzciLCJhcHBUeXBlIjoxMDAsImV4cCI6MTc3NjI5OTQwMCwiaWF0IjoxNzc2MjIyNDI4LCJpc3MiOiJhcGkuZnllcnMuaW4iLCJuYmYiOjE3NzYyMjI0MjgsInN1YiI6ImFjY2Vzc190b2tlbiJ9.Ma6kNLz23m-eS85Blny0Ph_3IpgxExo5rZHvSPHxo-4",    # updated daily by auth_token.py
+    "client_id":    "YOUR_CLIENT_ID",       # e.g. "XY12345-100"
+    "secret_key":   "YOUR_SECRET_KEY",
+    "redirect_uri": "https://127.0.0.1:8080",
+    "access_token": "YOUR_ACCESS_TOKEN",    # updated daily by auth_token.py
 }
 
 # ── Trading Parameters ─────────────────────────────────────────────────────────
@@ -51,16 +50,6 @@ TRADING_CONFIG = {
 
     # ── Daily risk limit ───────────────────────────────────────────────────────
     "daily_loss_limit_pct": 0.08,       # no new entries if down 8% on the day
-
-    # ── ADX momentum filter (15M) ──────────────────────────────────────────────
-    # Wilder's ADX(14). Confirms trending market before entry.
-    # BUY CE : ADX ≥ adx_min  AND  +DI > -DI
-    # BUY PE : ADX ≥ adx_min  AND  -DI > +DI
-    # Fail   : choppy market → skip signal
-    # Fail-open: if ADX data unavailable → allow trade
-    "adx_period":           14,
-    "adx_min":              25,
-    "adx_enabled":          True,
 
     # ── Exit — step-down RR ────────────────────────────────────────────────────
     "initial_rr":           3,
