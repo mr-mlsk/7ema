@@ -74,162 +74,97 @@ class OptionSelector:
         resp = requests.get(SYMBOL_MASTER_URL, timeout=30)
         resp.raise_for_status()
 
-        # ── Step 1: Read raw CSV with no assumptions ───────────────────────────
-        raw = pd.read_csv(
-            io.StringIO(resp.text),
-            header=None,
-            dtype=str,
-        )
+        # ── Read raw CSV ───────────────────────────────────────────────────────
+        raw = pd.read_csv(io.StringIO(resp.text), header=None, dtype=str)
         n_cols = len(raw.columns)
         logger.info(
-            f"[SymbolMaster] CSV: {len(raw)} rows × {n_cols} cols "
+            f"[SymbolMaster] CSV: {len(raw)} rows x {n_cols} cols "
             f"(expected {len(SYMBOL_MASTER_COLS)} cols)")
 
-        # ── Step 2: Detect if row 0 is a header row ────────────────────────────
-        # If Fyers added a header, skip it so data rows start at 1
+        # ── Skip header row if Fyers added one ────────────────────────────────
         first_row = raw.iloc[0].astype(str).str.lower().tolist()
-        has_header = any(v in first_row for v in
-                         ["fytoken", "symbol_details", "expiry_date",
-                          "strike_price", "option_type"])
-        if has_header:
+        if any(v in first_row for v in
+               ["fytoken", "symbol_details", "expiry_date", "strike_price"]):
             raw = raw.iloc[1:].reset_index(drop=True)
-            logger.info("[SymbolMaster] Header row detected and skipped")
+            logger.info("[SymbolMaster] Header row skipped")
 
-        # ── Step 3: Assign column names up to what we know ────────────────────
-        n = len(raw.columns)
-        known = SYMBOL_MASTER_COLS[:min(n, len(SYMBOL_MASTER_COLS))]
-        extras = [f"col_{i}" for i in range(len(known), n)]
-        raw.columns = known + extras
+        # ── Assign column names ────────────────────────────────────────────────
+        n     = len(raw.columns)
+        names = (SYMBOL_MASTER_COLS[:min(n, len(SYMBOL_MASTER_COLS))] +
+                 [f"col_{i}" for i in range(min(n, len(SYMBOL_MASTER_COLS)), n)])
+        raw.columns = names
 
-        # ── Step 4: Auto-detect the underlying symbol column ──────────────────
-        # The underlying_symbol column contains SHORT values like "NIFTY",
-        # "NIFTY50", "NIFTY 50" — NOT full option symbols like "NIFTY25APR...CE"
-        # We search for columns where values match short NIFTY (len <= 10)
-        # and are NOT the full option symbol string.
-        # This avoids picking symbol_details (col 1) which has long strings.
-        best_col   = None
-        best_count = 0
-
+        # ── Find the underlying_symbol column ──────────────────────────────────
+        # underlying_symbol has SHORT values like "NIFTY" (<=10 chars)
+        # NOT full option strings like "NIFTY25APR24500CE"
+        best_col, best_count = None, 0
         for col in raw.columns:
-            col_vals = raw[col].astype(str).str.strip().str.upper()
-            # Only count SHORT values (underlying ticker, not option symbol)
-            short_nifty = (
-                col_vals.str.match(r"^NIFTY(?!.*BANK)") &
-                (col_vals.str.len() <= 10)
+            vals = raw[col].astype(str).str.strip().str.upper()
+            n_short_nifty = (
+                vals.str.match(r"^NIFTY(?!.*BANK)") & (vals.str.len() <= 10)
             ).sum()
-            if short_nifty > best_count:
-                best_count = short_nifty
-                best_col   = col
+            if n_short_nifty > best_count:
+                best_count, best_col = n_short_nifty, col
 
-        # Fallback: if short-value search failed, try col named underlying_symbol
-        if best_col is None or best_count == 0:
+        if not best_col or best_count == 0:
+            # Fallback: use the named column directly
             if "underlying_symbol" in raw.columns:
                 best_col   = "underlying_symbol"
-                col_vals   = raw[best_col].astype(str).str.strip().str.upper()
-                best_count = col_vals.str.match(
-                    r"^NIFTY(?!.*BANK)").sum()
+                best_count = (raw["underlying_symbol"]
+                              .astype(str).str.strip().str.upper()
+                              .str.match(r"^NIFTY(?!.*BANK)").sum())
 
-        if best_col is None or best_count == 0:
+        if not best_col or best_count == 0:
             sample = {str(c): str(raw.iloc[0][c])[:40]
                       for c in list(raw.columns)[:10]}
-            logger.error(
-                f"[SymbolMaster] Could not find NIFTY underlying column. "
-                f"First row (cols 0-9): {sample}")
-            raise ValueError(
-                "Symbol master: no NIFTY underlying column found.")
+            logger.error(f"[SymbolMaster] No NIFTY column found. Row 0: {sample}")
+            raise ValueError("Symbol master: no NIFTY underlying column found.")
 
         logger.info(
             f"[SymbolMaster] Underlying column = '{best_col}' "
             f"({best_count} NIFTY rows)")
 
-        # ── Step 5: Filter to NIFTY (not NIFTYBANK / BANKNIFTY) ───────────────
-        # Use the detected column directly by position to avoid duplicate-
-        # column issues if "underlying_symbol" already exists under another name
-        u    = raw[best_col].astype(str).str.strip().str.upper()
-        mask = u.str.match(r"^NIFTY(?!.*BANK)")
+        # ── Filter to NIFTY rows ───────────────────────────────────────────────
+        mask = (raw[best_col].astype(str).str.strip().str.upper()
+                .str.match(r"^NIFTY(?!.*BANK)"))
         df   = raw[mask].copy()
 
-        # Ensure the filter column is named "underlying_symbol" in df
+        # Rename best_col to underlying_symbol if needed (drop dupe first)
         if best_col != "underlying_symbol":
-            # Drop any existing underlying_symbol to avoid duplicates
             if "underlying_symbol" in df.columns:
                 df = df.drop(columns=["underlying_symbol"])
             df = df.rename(columns={best_col: "underlying_symbol"})
 
-        # ── Step 6: Locate and parse expiry_date ──────────────────────────────
-        # Find which column has date-like values if "expiry_date" is misaligned
-        if "expiry_date" not in df.columns or                 pd.to_datetime(df["expiry_date"], errors="coerce").isna().all():
-            for col in df.columns:
-                parsed = pd.to_datetime(
-                    df[col], errors="coerce", dayfirst=True)
-                valid  = parsed.notna().sum()
-                if valid > len(df) * 0.8:
-                    df = df.rename(columns={col: "expiry_date"})
-                    logger.info(
-                        f"[SymbolMaster] expiry_date found in col '{col}'")
-                    break
-
+        # ── Parse expiry_date ─────────────────────────────────────────────────
+        # Fyers stores expiry as YYYY-MM-DD string — parse directly
         df["expiry_date"] = pd.to_datetime(
-            df["expiry_date"],
-            errors="coerce",
-            dayfirst=True,
-        ).dt.date
+            df["expiry_date"], format="%Y-%m-%d", errors="coerce").dt.date
 
-        # ── Step 7: Parse option_type ──────────────────────────────────────────
-        if "option_type" in df.columns:
-            df["option_type"] = (df["option_type"].fillna("")
-                                   .str.strip().str.upper())
-        else:
-            # Find the column that only contains CE/PE
-            for col in df.columns:
-                vals = df[col].astype(str).str.strip().str.upper().unique()
-                if set(vals).issubset({"CE", "PE", "NAN", ""}):
-                    df = df.rename(columns={col: "option_type"})
-                    df["option_type"] = df["option_type"].str.strip().str.upper()
-                    logger.info(
-                        f"[SymbolMaster] option_type found in col '{col}'")
-                    break
+        # Fallback: try epoch seconds if YYYY-MM-DD parse failed
+        if df["expiry_date"].isna().all():
+            logger.info("[SymbolMaster] Trying epoch fallback for expiry_date")
+            df["expiry_date"] = df["expiry_date_raw"].apply(
+                lambda x: pd.Timestamp(int(x), unit="s").date()
+                if str(x).strip().isdigit() else None
+            ) if "expiry_date_raw" in df.columns else None
 
+        # ── Parse option_type ─────────────────────────────────────────────────
+        df["option_type"] = (df["option_type"].fillna("")
+                               .str.strip().str.upper())
         df = df[df["option_type"].isin(["CE", "PE"])].copy()
 
-        # ── Step 8: Parse strike_price ────────────────────────────────────────
-        if "strike_price" in df.columns:
-            df["strike_price"] = pd.to_numeric(
-                df["strike_price"], errors="coerce")
-        else:
-            # Find a numeric column with reasonable strike values (15000-30000)
-            for col in df.columns:
-                num = pd.to_numeric(df[col], errors="coerce")
-                if num.between(5000, 50000).sum() > len(df) * 0.5:
-                    df = df.rename(columns={col: "strike_price"})
-                    df["strike_price"] = pd.to_numeric(
-                        df["strike_price"], errors="coerce")
-                    logger.info(
-                        f"[SymbolMaster] strike_price found in col '{col}'")
-                    break
+        # ── Parse strike_price ────────────────────────────────────────────────
+        df["strike_price"] = pd.to_numeric(df["strike_price"], errors="coerce")
 
-        # ── Step 9: Locate symbol_ticker (Fyers symbol string) ────────────────
-        # Find the column whose values look like NSE:NIFTYYYMMDD...CE/PE
-        if "symbol_ticker" not in df.columns:
-            for col in df.columns:
-                sample_vals = df[col].dropna().astype(str).head(20)
-                if sample_vals.str.contains("NIFTY.*(?:CE|PE)$",
-                                             regex=True).sum() >= 10:
-                    df = df.rename(columns={col: "symbol_ticker"})
-                    logger.info(
-                        f"[SymbolMaster] symbol_ticker found in col '{col}'")
-                    break
-
+        # ── Final cleanup ─────────────────────────────────────────────────────
         df.dropna(subset=["expiry_date", "strike_price"], inplace=True)
 
         if len(df) == 0:
             raise ValueError(
-                "Symbol master: 0 valid NIFTY CE/PE rows after parsing. "
-                "Check expiry_date and strike_price columns.")
+                "Symbol master: 0 valid NIFTY CE/PE rows after parsing.")
 
         self._sym_df = df
-        logger.info(
-            f"Symbol master loaded: {len(df)} NIFTY F&O instruments.")
+        logger.info(f"Symbol master loaded: {len(df)} NIFTY F&O instruments.")
         self._log_available_expiries()
 
     def _log_available_expiries(self):
